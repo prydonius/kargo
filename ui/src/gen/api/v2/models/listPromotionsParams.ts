@@ -11,4 +11,8 @@ export type ListPromotionsParams = {
    * Stage filter
    */
   stage?: string;
+  /**
+   * Return only history table fields and step links
+   */
+  summary?: boolean;
 };

@@ -1774,6 +1774,12 @@
             "description": "Stage filter",
             "name": "stage",
             "in": "query"
+          },
+          {
+            "type": "boolean",
+            "description": "Return only history table fields and step links",
+            "name": "summary",
+            "in": "query"
           }
         ],
         "responses": {

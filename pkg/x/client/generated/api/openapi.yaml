@@ -1327,6 +1327,11 @@ paths:
         name: stage
         schema:
           type: string
+      - description: Return only history table fields and step links
+        in: query
+        name: summary
+        schema:
+          type: boolean
       responses:
         "200":
           content:

@@ -4774,11 +4774,18 @@ type ApiListPromotionsRequest struct {
 	ApiService *CoreAPIService
 	project string
 	stage *string
+	summary *bool
 }
 
 // Stage filter
 func (r ApiListPromotionsRequest) Stage(stage string) ApiListPromotionsRequest {
 	r.stage = &stage
+	return r
+}
+
+// Return only history table fields and step links
+func (r ApiListPromotionsRequest) Summary(summary bool) ApiListPromotionsRequest {
+	r.summary = &summary
 	return r
 }
 
@@ -4828,6 +4835,9 @@ func (a *CoreAPIService) ListPromotionsExecute(r ApiListPromotionsRequest) (*Pro
 
 	if r.stage != nil {
 		parameterAddToHeaderOrQuery(localVarQueryParams, "stage", r.stage, "", "")
+	}
+	if r.summary != nil {
+		parameterAddToHeaderOrQuery(localVarQueryParams, "summary", r.summary, "", "")
 	}
 	// to determine the Content-Type header
 	localVarHTTPContentTypes := []string{}

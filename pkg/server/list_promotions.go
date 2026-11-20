@@ -11,6 +11,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kargoapi "github.com/akuity/kargo/api/v1alpha1"
+	"github.com/akuity/kargo/pkg/kubernetes"
 	"github.com/akuity/kargo/pkg/logging"
 )
 
@@ -22,6 +23,7 @@ import (
 // @Security BearerAuth
 // @Param project path string true "Project name"
 // @Param stage query string false "Stage filter"
+// @Param summary query boolean false "Return only history table fields and step links"
 // @Produce json
 // @Success 200 {object} kargoapi.PromotionList "PromotionList custom resource"
 // @Router /v1beta1/projects/{project}/promotions [get]
@@ -30,18 +32,33 @@ func (s *server) listPromotions(c *gin.Context) {
 	project := c.Param("project")
 	stage := c.Query("stage")
 
-	if watchMode := c.Query("watch") == trueStr; watchMode {
-		s.watchPromotions(c, project, stage, c.Query("resourceVersion"))
+	summary := c.Query("summary") == trueStr
+	opts := []client.ListOption{client.InNamespace(project)}
+	watch := c.Query("watch") == trueStr
+	if watch {
+		opts = buildWatchListOptions(project, c.Query("resourceVersion"))
+	}
+	if summary && stage != "" {
+		opts = append(opts, client.MatchingLabels{kargoapi.LabelKeyStage: kubernetes.ShortenLabelValue(stage)})
+	}
+	if watch {
+		s.watchPromotions(c, stage, summary, opts)
 		return
 	}
 
 	list := &kargoapi.PromotionList{}
-	if err := s.listForWatchSeed(ctx, "promotions", list, client.InNamespace(project)); err != nil {
+	if err := s.listForWatchSeed(ctx, "promotions", list, opts...); err != nil {
 		_ = c.Error(err)
 		return
 	}
 	if stage != "" {
 		list.Items = filterPromotionsByStage(list.Items, stage)
+	}
+
+	if summary {
+		for i := range list.Items {
+			list.Items[i] = promotionHistoryRow(&list.Items[i])
+		}
 	}
 
 	list.ResourceVersion = normalizeListResourceVersion(list.ResourceVersion)
@@ -56,11 +73,8 @@ func (s *server) listPromotions(c *gin.Context) {
 
 // filterPromotionsByStage returns Promotions that target the specified Stage.
 //
-// Stage filtering is done in-process rather than via the PromotionsByStage
-// field index because the watch-seed list goes through listForWatchSeed's
-// uncached reader, which cannot serve controller-runtime field indexes. This
-// over-fetches the whole namespace, but it matches the (also unfiltered)
-// follow-up watch and keeps the returned ResourceVersion watchable.
+// Check the full stage name even for label-selected history: long names have
+// shortened label values. Full-object callers need not have labeled Promotions.
 func filterPromotionsByStage(promotions []kargoapi.Promotion, stage string) []kargoapi.Promotion {
 	filtered := make([]kargoapi.Promotion, 0, len(promotions))
 	for _, promotion := range promotions {
@@ -72,16 +86,14 @@ func filterPromotionsByStage(promotions []kargoapi.Promotion, stage string) []ka
 }
 
 // watchPromotions streams Promotion changes through the REST SSE endpoint.
-func (s *server) watchPromotions(c *gin.Context, project, stage, resourceVersion string) {
+func (s *server) watchPromotions(c *gin.Context, stage string, summary bool, opts []client.ListOption) {
 	ctx := c.Request.Context()
 	logger := logging.LoggerFromContext(ctx)
 
-	// Note: We can't filter by stage using field selector in the watch API.
-	// The indexer is for List operations only. We filter events client-side.
 	w, err := s.client.Watch(
 		ctx,
 		&kargoapi.PromotionList{},
-		buildWatchListOptions(project, resourceVersion)...,
+		opts...,
 	)
 	if err != nil {
 		if SendSSEWatchStartError(c, err) {
@@ -133,6 +145,10 @@ func (s *server) watchPromotions(c *gin.Context, project, stage, resourceVersion
 				}
 			}
 
+			if summary {
+				row := promotionHistoryRow(promotion)
+				promotion = &row
+			}
 			if !SendSSEWatchEvent(c, eventType, promotion) {
 				return
 			}

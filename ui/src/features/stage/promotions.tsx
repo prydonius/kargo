@@ -120,11 +120,10 @@ const ClassicPromotions = ({ stage, argocdShard }: { stage: Stage; argocdShard?:
 
   const { name: projectName, stageName } = useParams();
 
-  const listPromotionsQuery = useListPromotions(
-    projectName || '',
-    { stage: stageName },
-    { query: { enabled: !!stageName } }
-  );
+  const historyParams = { stage: stageName, summary: true };
+  const listPromotionsQuery = useListPromotions(projectName || '', historyParams, {
+    query: { enabled: !!stageName }
+  });
 
   const freightMap = useGetFreightMap(projectName || '');
 
@@ -141,7 +140,7 @@ const ClassicPromotions = ({ stage, argocdShard }: { stage: Stage; argocdShard?:
   // modal kept in the same component for live view
   const [selectedPromotion, setSelectedPromotion] = useState<Promotion | undefined>();
 
-  useWatchPromotions(projectName || '', stageName || '', !listPromotionsQuery.isLoading);
+  useWatchPromotions(projectName || '', historyParams, !listPromotionsQuery.isLoading);
 
   const promotions = React.useMemo(() => {
     // Immutable sorting

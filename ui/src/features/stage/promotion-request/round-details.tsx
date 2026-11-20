@@ -117,7 +117,7 @@ export const RoundDetails = ({
     { stage: stageName },
     { query: { enabled: !!stageName, refetchInterval: TARGETS_POLL_INTERVAL_MS } }
   );
-  useWatchPromotions(project, stageName, !promotionsQuery.isLoading);
+  useWatchPromotions(project, { stage: stageName }, !promotionsQuery.isLoading);
 
   const freightMap = useGetFreightMap(project);
   const freightName = request?.spec?.freight || '';

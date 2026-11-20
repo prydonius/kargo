@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 
 import { getListPromotionsQueryKey, listPromotionsResponse } from '@ui/gen/api/v2/core/core';
-import { Promotion } from '@ui/gen/api/v2/models';
+import { ListPromotionsParams, Promotion } from '@ui/gen/api/v2/models';
 
 import { runSeededWatch, upsertOrDelete } from '../watch-utils';
 
@@ -10,7 +10,11 @@ import { runSeededWatch, upsertOrDelete } from '../watch-utils';
 // before a seed resourceVersion is available — otherwise it would start an
 // unseeded watch that replays every Promotion. (Unlike the pipeline page, this
 // page has no loading gate above the watch, so the caller must pass it.)
-export const useWatchPromotions = (project: string, stage: string, enabled = true) => {
+export const useWatchPromotions = (
+  project: string,
+  { stage, summary }: ListPromotionsParams,
+  enabled = true
+) => {
   const client = useQueryClient();
 
   useEffect(() => {
@@ -19,7 +23,7 @@ export const useWatchPromotions = (project: string, stage: string, enabled = tru
     }
 
     const abort = new AbortController();
-    const listKey = getListPromotionsQueryKey(project, { stage });
+    const listKey = getListPromotionsQueryKey(project, { stage, summary });
 
     const seedResourceVersion = () =>
       (client.getQueryData(listKey) as listPromotionsResponse | undefined)?.data?.metadata
@@ -27,6 +31,9 @@ export const useWatchPromotions = (project: string, stage: string, enabled = tru
 
     const buildUrl = (resourceVersion: string) => {
       const params = new URLSearchParams({ watch: 'true', stage });
+      if (summary) {
+        params.set('summary', 'true');
+      }
       if (resourceVersion) {
         params.append('resourceVersion', resourceVersion);
       }
@@ -62,5 +69,5 @@ export const useWatchPromotions = (project: string, stage: string, enabled = tru
     });
 
     return () => abort.abort();
-  }, [project, stage, client, enabled]);
+  }, [project, stage, client, enabled, summary]);
 };

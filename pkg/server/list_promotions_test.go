@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -145,4 +146,77 @@ func Test_server_listPromotions_watch(t *testing.T) {
 			},
 		},
 	)
+}
+
+func Test_server_promotionHistory(t *testing.T) {
+	const ns = "project"
+	const stage = "staging"
+	const path = "/v1beta1/projects/project/promotions?stage=staging&summary=true"
+	project := &kargoapi.Project{ObjectMeta: metav1.ObjectMeta{Name: ns}}
+	p := &kargoapi.Promotion{}
+	require.NoError(t, json.Unmarshal([]byte(`{
+ "metadata": {
+   "name": "example", "namespace": "project", "labels": {"kargo.akuity.io/stage": "staging"},
+   "annotations": {"kargo.akuity.io/create-actor": "admin", "irrelevant": "omit-me"}
+ },
+ "spec": {"stage": "staging", "freight": "freight", "steps": [{"uses": "git-open-pr", "config": {"x": "omit-me"}}]},
+ "status": {"phase": "Succeeded", "state": {"step-0": {
+   "pr": {"url": "https://example.org/pull/1"}, "links": [{"url": "https://example.org/log"}], "large": "omit-me"
+ }}}
+}`), p))
+	other := p.DeepCopy()
+	other.Name = "other"
+	other.Labels[kargoapi.LabelKeyStage] = "other"
+	other.Spec.Stage = "other"
+	check := func(t *testing.T, row *kargoapi.Promotion) {
+		require.Equal(t, p.Name, row.Name)
+		require.Equal(t, stage, row.Spec.Stage)
+		require.Equal(t, p.Spec.Freight, row.Spec.Freight)
+		require.NotEmpty(t, row.ResourceVersion)
+		require.Equal(t, p.Status.Phase, row.Status.Phase)
+		require.Equal(t, "admin", row.Annotations[kargoapi.AnnotationKeyCreateActor])
+		require.Equal(t, []kargoapi.PromotionStep{{As: "step-0", Uses: "git-open-pr"}}, row.Spec.Steps)
+		require.NotNil(t, row.Status.State)
+		require.JSONEq(t, `{"step-0": {
+ "pr": {"url":"https://example.org/pull/1"},
+ "links": [{"url":"https://example.org/log"}]
+}}`, string(row.Status.State.Raw))
+	}
+	testRESTEndpoint(t, &config.ServerConfig{}, http.MethodGet, path, []restTestCase{{
+		name:          "seed",
+		clientBuilder: fake.NewClientBuilder().WithObjects(project.DeepCopy(), p.DeepCopy(), other.DeepCopy()),
+		assertions: func(t *testing.T, w *httptest.ResponseRecorder, _ client.Client) {
+			require.Equal(t, http.StatusOK, w.Code)
+			require.NotContains(t, w.Body.String(), "omit-me")
+			var list kargoapi.PromotionList
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &list))
+			require.Len(t, list.Items, 1)
+			check(t, &list.Items[0])
+		},
+	}})
+	testRESTWatchEndpoint(t, &config.ServerConfig{}, path+"&watch=true", []restWatchTestCase{{
+		name:          "watch",
+		clientBuilder: fake.NewClientBuilder().WithObjects(project),
+		operations: func(ctx context.Context, c client.Client) {
+			for _, promo := range []*kargoapi.Promotion{other, p} {
+				if err := c.Create(ctx, promo.DeepCopy()); err != nil {
+					t.Errorf("creating test Promotion: %v", err)
+					return
+				}
+			}
+		},
+		assertions: func(t *testing.T, w *httptest.ResponseRecorder, _ client.Client) {
+			require.Equal(t, http.StatusOK, w.Code)
+			require.NotContains(t, w.Body.String(), "omit-me")
+			for _, line := range strings.Split(w.Body.String(), "\n") {
+				if data, ok := strings.CutPrefix(line, "data: "); ok {
+					var e WatchEvent[kargoapi.Promotion]
+					require.NoError(t, json.Unmarshal([]byte(data), &e))
+					check(t, &e.Object)
+					return
+				}
+			}
+			t.Fatal("no watch event")
+		},
+	}})
 }
